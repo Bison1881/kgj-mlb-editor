@@ -8,7 +8,7 @@ Built by reverse engineering the original binary — no existing documentation, 
 
 ## Usage
 
-1. Download `KGJ_Editor.html`
+1. Download `KGJ-MLB Editor.html`
 2. Open it in **Chrome** or **Edge** (other browsers should work but are untested)
 3. Drag and drop your ROM file onto the load screen, or click to browse
 4. Select a team from the sidebar
