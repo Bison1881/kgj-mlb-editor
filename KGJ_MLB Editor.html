@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KGJ MLB Editor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0a0c0f; --surface:#111418; --surface2:#181c22; --surface3:#1e2430;
+    --border:#2a3040; --border-bright:#3a4560;
+    --green:#00e676; --green-dim:#00a854; --amber:#ffab00; --red:#ff3d3d; --blue:#4fc3f7;
+    --text:#e8eaf0; --text-dim:#7a8499; --text-muted:#4a5268;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:'IBM Plex Mono',monospace; min-height:100vh; overflow-x:hidden; }
+  body::before { content:''; position:fixed; top:0;left:0;right:0;bottom:0; background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.07) 2px,rgba(0,0,0,0.07) 4px); pointer-events:none; z-index:9999; }
+
+  /* HEADER */
+  .header { background:var(--surface); border-bottom:1px solid var(--border); padding:0 16px; display:flex; align-items:center; justify-content:space-between; height:52px; position:sticky; top:0; z-index:200; box-shadow:0 0 30px rgba(0,230,118,0.1); gap:12px; }
+  .header-title { font-family:'Oswald',sans-serif; font-size:18px; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:var(--green); text-shadow:0 0 20px rgba(0,230,118,0.5); white-space:nowrap; }
+  .header-sub { font-size:9px; color:var(--text-dim); letter-spacing:2px; }
+  .header-center { display:flex; align-items:center; gap:8px; flex:1; justify-content:center; }
+  .header-status { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-dim); white-space:nowrap; }
+  .status-dot { width:8px; height:8px; border-radius:50%; background:var(--text-muted); flex-shrink:0; }
+  .status-dot.active { background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  /* ACTION BAR */
+  .action-bar { background:var(--surface); border-bottom:2px solid var(--green); padding:0 16px; display:flex; align-items:center; gap:8px; height:40px; position:sticky; top:52px; z-index:199; box-shadow:0 0 20px rgba(0,230,118,0.07); flex-wrap:nowrap; }
+  .action-bar .btn { padding:5px 14px; font-size:11px; }
+  .action-bar .btn-sm { padding:4px 10px; }
+  .action-bar-sep { width:1px; height:20px; background:var(--border); flex-shrink:0; margin:0 2px; }
+  .action-bar-clip { font-size:10px; color:var(--amber); white-space:nowrap; }
+
+  /* HEADER SEARCH */
+  .header-search { display:flex; align-items:center; background:var(--surface2); border:1px solid var(--border); border-radius:2px; padding:4px 10px; gap:6px; width:260px; }
+  .header-search input { background:none; border:none; outline:none; color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:11px; width:100%; }
+  .header-search input::placeholder { color:var(--text-muted); }
+  .header-search:focus-within { border-color:var(--green); }
+  .search-icon { color:var(--text-muted); font-size:12px; }
+
+  /* SEARCH RESULTS DROPDOWN */
+  .search-results { position:absolute; top:52px; left:50%; transform:translateX(-50%); width:400px; background:var(--surface); border:1px solid var(--border-bright); border-top:none; z-index:300; max-height:320px; overflow-y:auto; }
+  .search-result-item { padding:8px 14px; cursor:pointer; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border); transition:background 0.1s; }
+  .search-result-item:hover { background:var(--surface2); }
+  .search-result-team { font-size:9px; color:var(--text-muted); letter-spacing:1px; width:100px; flex-shrink:0; }
+  .search-result-name { font-size:12px; color:var(--text); }
+  .search-result-pos { font-size:10px; color:var(--green); width:30px; }
+  .search-result-section { font-size:9px; color:var(--text-muted); }
+
+  /* LAYOUT */
+  .app { display:flex; height:calc(100vh - 92px); }
+  .sidebar { width:200px; min-width:200px; background:var(--surface); border-right:1px solid var(--border); overflow-y:auto; padding:12px 0; transition:width 0.2s, min-width 0.2s; position:relative; flex-shrink:0; }
+  .sidebar.collapsed { width:32px; min-width:32px; overflow:hidden; }
+  .sidebar.collapsed .league-header, .sidebar.collapsed .division-header, .sidebar.collapsed .team-btn { display:none; }
+  .sidebar-toggle { position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:center; width:100%; height:28px; background:var(--surface2); border:none; border-bottom:1px solid var(--border); color:var(--text-muted); cursor:pointer; font-size:11px; transition:color 0.1s; }
+  .sidebar-toggle:hover { color:var(--green); }
+  .league-header { font-family:'Oswald',sans-serif; font-size:10px; letter-spacing:3px; color:var(--text-muted); padding:16px 16px 6px; text-transform:uppercase; }
+  .league-header:not(:first-child) { margin-top:8px; border-top:1px solid var(--border); }
+  .division-header { font-size:9px; letter-spacing:2px; color:var(--green-dim); padding:8px 16px 4px; text-transform:uppercase; }
+  .team-btn { display:block; width:100%; text-align:left; background:none; border:none; color:var(--text-dim); font-family:'IBM Plex Mono',monospace; font-size:11px; padding:7px 16px; cursor:pointer; transition:all 0.1s; letter-spacing:1px; }
+  .team-btn:hover { background:var(--surface2); color:var(--text); }
+  .team-btn.active { background:var(--surface3); color:var(--green); border-left:2px solid var(--green); }
+
+  /* COMPARE PANEL */
+  .compare-layout { display:flex; height:100%; overflow:hidden; }
+  .compare-pane { flex:1; overflow-y:auto; padding:16px 20px; border-right:1px solid var(--border); }
+  .compare-pane:last-child { border-right:none; }
+  .compare-selector { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+  .compare-select { background:var(--surface2); border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:11px; padding:4px 8px; border-radius:2px; outline:none; cursor:pointer; flex:1; }
+  .compare-select:focus { border-color:var(--green); }
+
+  /* MAIN */
+  .main { flex:1; overflow-y:auto; padding:20px 24px; background:var(--bg); min-width:0; }
+
+  /* DROPZONE */
+  .dropzone { border:2px dashed var(--border-bright); border-radius:4px; padding:60px 40px; text-align:center; cursor:pointer; transition:all 0.2s; background:var(--surface); margin:40px auto; max-width:600px; }
+  .dropzone:hover, .dropzone.drag-over { border-color:var(--green); background:rgba(0,230,118,0.03); box-shadow:0 0 40px rgba(0,230,118,0.08); }
+  .dropzone-icon { font-size:48px; margin-bottom:16px; opacity:0.5; }
+  .dropzone h2 { font-family:'Oswald',sans-serif; font-size:22px; letter-spacing:3px; color:var(--text); margin-bottom:8px; }
+  .dropzone .drop-hint { color:var(--green); font-size:12px; line-height:1.8; }
+  .dropzone .drop-sub { color:var(--text-muted); font-size:11px; margin-top:6px; }
+
+  /* TEAM PANEL */
+  .team-panel { animation:fadein 0.15s ease; }
+  @keyframes fadein { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+  .team-header { display:flex; align-items:center; gap:16px; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  .team-name { font-family:'Oswald',sans-serif; font-size:26px; font-weight:700; letter-spacing:4px; color:var(--green); text-shadow:0 0 30px rgba(0,230,118,0.3); }
+  .team-meta { font-size:10px; color:var(--text-muted); letter-spacing:2px; }
+  .section-label { font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:4px; color:var(--text-muted); text-transform:uppercase; margin:20px 0 8px; display:flex; align-items:center; gap:10px; }
+  .section-label::after { content:''; flex:1; height:1px; background:var(--border); }
+
+  /* BULK ADJUST */
+  .bulk-bar { display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--surface2); border:1px solid var(--border); border-radius:2px; margin-bottom:8px; flex-wrap:wrap; }
+  .bulk-bar label { font-size:10px; color:var(--text-muted); letter-spacing:1px; }
+  .bulk-select { background:var(--surface3); border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:11px; padding:2px 6px; border-radius:2px; outline:none; cursor:pointer; }
+  .bulk-select:focus { border-color:var(--amber); }
+  .bulk-input { background:var(--surface3); border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:11px; padding:2px 6px; border-radius:2px; outline:none; width:48px; text-align:center; }
+  .bulk-input:focus { border-color:var(--amber); }
+  .btn-amber { font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:1px; text-transform:uppercase; padding:4px 12px; border:1px solid var(--amber); background:rgba(255,171,0,0.08); color:var(--amber); cursor:pointer; border-radius:2px; transition:all 0.15s; }
+  .btn-amber:hover { background:rgba(255,171,0,0.15); }
+
+  /* PLAYER TABLE */
+  .player-table { width:100%; border-collapse:collapse; margin-bottom:4px; }
+  .player-table th { font-size:9px; letter-spacing:2px; color:var(--text-muted); text-align:left; padding:4px 6px; border-bottom:1px solid var(--border); font-weight:400; white-space:nowrap; }
+  .player-table th.stat-col { text-align:center; }
+  .player-table tr.player-row { border-bottom:1px solid rgba(42,48,64,0.5); transition:background 0.1s; }
+  .player-table tr.player-row:hover { background:var(--surface2); }
+  .player-table tr.player-row.copied { outline:1px solid var(--amber); background:rgba(255,171,0,0.04); }
+  .player-table td { padding:3px 6px; vertical-align:middle; }
+
+  /* INPUTS */
+  .cell-input { background:transparent; border:none; border-bottom:1px solid transparent; color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:12px; width:100%; outline:none; padding:2px 0; transition:all 0.1s; border-radius:2px; }
+  .cell-input:focus { background:rgba(0,230,118,0.08); border-bottom:1px solid var(--green); color:var(--green); box-shadow:0 0 0 3px rgba(0,230,118,0.12); }
+  .cell-input.name-input { width:86px; text-transform:uppercase; }
+  .cell-input.initial-input { width:16px; text-transform:uppercase; text-align:center; }
+  .cell-input.num-input { width:32px; text-align:center; }
+  .cell-input.raw-input { width:36px; text-align:center; }
+  .stat-cell { display:flex; align-items:center; justify-content:center; }
+  .stat-input { background:transparent; border:none; border-bottom:1px solid transparent; color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:500; width:26px; text-align:center; outline:none; padding:2px; -moz-appearance:textfield; transition:all 0.1s; border-radius:2px; }
+  .stat-input::-webkit-outer-spin-button, .stat-input::-webkit-inner-spin-button { -webkit-appearance:none; }
+  .stat-input:focus { background:rgba(0,230,118,0.08); border-bottom:1px solid var(--green); color:var(--green); box-shadow:0 0 0 3px rgba(0,230,118,0.12); }
+  .stat-bar { height:3px; width:28px; background:var(--border); border-radius:2px; overflow:hidden; margin-left:4px; }
+  .stat-bar-fill { height:100%; border-radius:2px; transition:width 0.2s; }
+  .pos-select, .bh-select { background:var(--surface2); border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:11px; padding:2px 4px; border-radius:2px; outline:none; cursor:pointer; transition:all 0.1s; }
+  .pos-select { width:46px; } .bh-select { width:52px; }
+  .pos-select:focus, .bh-select:focus { border-color:var(--green); box-shadow:0 0 0 3px rgba(0,230,118,0.12); color:var(--green); }
+
+  /* ROW CONTROLS */
+  .row-ctrl { display:flex; align-items:center; gap:2px; }
+  .move-btn { background:none; border:1px solid var(--border); color:var(--text-muted); width:18px; height:18px; border-radius:2px; cursor:pointer; font-size:9px; display:flex; align-items:center; justify-content:center; transition:all 0.1s; flex-shrink:0; }
+  .move-btn:hover:not(:disabled) { border-color:var(--green); color:var(--green); }
+  .move-btn:disabled { opacity:0.2; cursor:default; }
+  .copy-btn { background:none; border:1px solid var(--border); color:var(--text-muted); width:18px; height:18px; border-radius:2px; cursor:pointer; font-size:9px; display:flex; align-items:center; justify-content:center; transition:all 0.1s; flex-shrink:0; }
+  .copy-btn:hover { border-color:var(--amber); color:var(--amber); }
+  .copy-btn.active { border-color:var(--amber); color:var(--amber); background:rgba(255,171,0,0.1); }
+  .paste-btn { background:none; border:1px solid var(--border); color:var(--text-muted); width:18px; height:18px; border-radius:2px; cursor:pointer; font-size:9px; display:flex; align-items:center; justify-content:center; transition:all 0.1s; flex-shrink:0; }
+  .paste-btn:hover:not(:disabled) { border-color:var(--blue); color:var(--blue); }
+  .paste-btn:disabled { opacity:0.2; cursor:default; }
+  .idx-badge { display:inline-block; font-size:9px; color:var(--text-muted); width:14px; text-align:right; }
+
+  /* TOOLBAR */
+  .toolbar { display:flex; gap:8px; margin-top:20px; padding-top:14px; border-top:1px solid var(--border); flex-wrap:wrap; align-items:center; }
+  .btn { font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase; padding:7px 16px; border:1px solid var(--border); background:var(--surface2); color:var(--text-dim); cursor:pointer; border-radius:2px; transition:all 0.15s; }
+  .btn:hover { border-color:var(--green); color:var(--green); background:rgba(0,230,118,0.05); }
+  .btn.primary { border-color:var(--green); color:var(--green); background:rgba(0,230,118,0.08); box-shadow:0 0 20px rgba(0,230,118,0.1); }
+  .btn.primary:hover { background:rgba(0,230,118,0.15); }
+  .undo-redo { display:flex; gap:4px; }
+  .btn-sm { font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:1px; text-transform:uppercase; padding:5px 10px; border:1px solid var(--border); background:var(--surface2); color:var(--text-muted); cursor:pointer; border-radius:2px; transition:all 0.15s; }
+  .btn-sm:hover:not(:disabled) { border-color:var(--text-dim); color:var(--text-dim); }
+  .btn-sm:disabled { opacity:0.3; cursor:default; }
+
+  /* MODAL */
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:500; display:flex; align-items:center; justify-content:center; }
+  .modal { background:var(--surface); border:1px solid var(--border-bright); border-radius:4px; padding:24px; min-width:360px; max-width:500px; box-shadow:0 0 60px rgba(0,0,0,0.5); }
+  .modal h3 { font-family:'Oswald',sans-serif; font-size:16px; letter-spacing:3px; color:var(--green); margin-bottom:16px; }
+  .modal p { font-size:12px; color:var(--text-dim); line-height:1.8; margin-bottom:16px; }
+  .modal-btns { display:flex; gap:8px; justify-content:flex-end; }
+
+  /* TOAST */
+  .toast { position:fixed; bottom:24px; right:24px; background:var(--surface2); border:1px solid var(--green); color:var(--green); font-size:11px; letter-spacing:1px; padding:10px 18px; border-radius:2px; box-shadow:0 0 30px rgba(0,230,118,0.2); z-index:1000; animation:toastin 0.2s ease; }
+  .toast.error { border-color:var(--red); color:var(--red); }
+  .toast.warn { border-color:var(--amber); color:var(--amber); }
+  @keyframes toastin { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+
+  /* TABS */
+  .view-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:0; }
+  .view-tab { font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase; padding:8px 20px; border:none; background:none; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; transition:all 0.1s; }
+  .view-tab:hover { color:var(--text-dim); }
+  .view-tab.active { color:var(--green); border-bottom-color:var(--green); }
+
+  ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:var(--bg); }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--border-bright); }
+  .no-rom { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--text-muted); font-size:12px; letter-spacing:2px; gap:8px; }
+  .no-rom-icon { font-size:36px; opacity:0.3; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useCallback, useMemo } = React;
+
+// ── ENCODING ──────────────────────────────────────────────────────────────────
+const encodeLetter = ch => ch.toUpperCase().charCodeAt(0) - 65 + 0x0B;
+const decodeLetter = b => b >= 0x0B ? String.fromCharCode(b - 0x0B + 65) : '';
+const decodeName = (block, start, len=8) => { let s=''; for(let i=0;i<len;i++){const b=block[start+i];if(b===0||b<0x0B)break;s+=decodeLetter(b);} return s; };
+const encodeName = (name, len=8) => { const arr=new Uint8Array(len); const upper=name.toUpperCase().slice(0,len); for(let i=0;i<upper.length;i++){const c=upper.charCodeAt(i);if(c>=65&&c<=90)arr[i]=encodeLetter(upper[i]);} return arr; };
+
+const ALL_POSITIONS = ['P','C','1B','2B','3B','SS','LF','CF','RF','DH','OF','IF'];
+const POS_CODES = {P:0x00,C:0x02,LF:0x04,CF:0x06,RF:0x08,'3B':0x0A,SS:0x0C,'2B':0x0E,'1B':0x10,DH:0x12,OF:0x14,IF:0x16};
+const CODE_TO_POS = Object.fromEntries(Object.entries(POS_CODES).map(([k,v])=>[v,k]));
+const BH_OPTIONS = [{label:'R/R',value:0x00},{label:'R/L',value:0x01},{label:'L/R',value:0x10},{label:'L/L',value:0x11},{label:'S/R',value:0x20},{label:'S/L',value:0x21}];
+const bh_to_label = v => (BH_OPTIONS.find(o=>o.value===v)||{label:`0x${v.toString(16).padStart(2,'0')}`}).label;
+const isPitcherPos = pos => pos === 'P';
+
+const TEAM_OFFSETS = {
+  'BAL ORIOLES':1263872,'BOS RED SOX':1264672,'CAL ANGELS':1265472,'CHI WHITE SOX':1266272,'CLE INDIANS':1267072,
+  'DET TIGERS':1267872,'KC ROYALS':1268672,'MIL BREWERS':1269472,'MIN TWINS':1270272,'NY YANKEES':1271072,
+  'OAK ATHLETICS':1271872,'SEA MARINERS':1272672,'TEX RANGERS':1273472,'TOR BLUE JAYS':1274272,
+  'ATL BRAVES':1277952,'CHI CUBS':1278752,'CIN REDS':1279552,'HOU ASTROS':1280352,'LA DODGERS':1281152,
+  'MON EXPOS':1281952,'NY METS':1282752,'PIT PIRATES':1283552,'STL CARDINALS':1284352,'SD PADRES':1285152,
+  'SF GIANTS':1285952,'PHI PHILLIES':1286752,'COL ROCKIES':1287552,'FLA MARLINS':1288352
+};
+const ALL_TEAMS = Object.keys(TEAM_OFFSETS);
+
+const TEAMS_STRUCTURE = {
+  AL:{East:['BAL ORIOLES','BOS RED SOX','CAL ANGELS','CHI WHITE SOX','CLE INDIANS'],Central:['DET TIGERS','KC ROYALS','MIL BREWERS','MIN TWINS','NY YANKEES'],West:['OAK ATHLETICS','SEA MARINERS','TEX RANGERS','TOR BLUE JAYS']},
+  NL:{East:['ATL BRAVES','CHI CUBS','CIN REDS','HOU ASTROS','LA DODGERS'],Central:['MON EXPOS','NY METS','PIT PIRATES','STL CARDINALS','SD PADRES'],West:['SF GIANTS','PHI PHILLIES','COL ROCKIES','FLA MARLINS']}
+};
+
+const HITTER_STATS = ['bat','pow','spd','def'];
+const PITCHER_STATS = ['spd','con','fat'];
+
+// ── ROM IO ────────────────────────────────────────────────────────────────────
+const readPlayer = (block, slotIndex) => {
+  const base = slotIndex * 32;
+  const first = block[base]>=0x0B ? decodeLetter(block[base]) : '?';
+  const last = decodeName(block, base+1, 8);
+  const pos = CODE_TO_POS[block[base+9]] || 'P';
+  const num = block[base+10];
+  const b11=block[base+11], b12=block[base+12];
+  const pitcher = isPitcherPos(pos);
+  const stats = pitcher
+    ? {spd:(b11>>4)+1, con:(b11&0xF)+1, fat:b12+1}
+    : {bat:(b11>>4)+1, pow:(b11&0xF)+1, spd:(b12>>4)+1, def:(b12&0xF)+1};
+  const bh=block[base+13], body=block[base+14], face=block[base+15], legs=block[base+16];
+  const avg = block[base+24]+256*(block[base+25]&0x01);
+  const hr  = block[base+26], rbi=block[base+28];
+  const losses=block[base+24], saves=block[base+30];
+  const eraRaw=block[base+28]+256*(block[base+29]&0x01);
+  const gameStats = pitcher ? {losses,saves,eraRaw} : {avg,hr,rbi};
+  return {first,last,pos,num,stats,bh,body,face,legs,gameStats,slotIndex};
+};
+
+const writePlayer = (romBuffer, teamOffset, player) => {
+  const base = teamOffset + player.slotIndex*32;
+  const arr = new Uint8Array(romBuffer);
+  if(player.first&&/[A-Za-z]/.test(player.first)) arr[base]=encodeLetter(player.first[0]);
+  const nb=encodeName(player.last,8); for(let i=0;i<8;i++) arr[base+1+i]=nb[i];
+  arr[base+9]=POS_CODES[player.pos]!==undefined?POS_CODES[player.pos]:0x00;
+  arr[base+10]=Math.max(0,Math.min(255,player.num));
+  const s=player.stats, clamp=(v,mn=1,mx=10)=>Math.max(mn,Math.min(mx,v||mn));
+  if(isPitcherPos(player.pos)){
+    arr[base+11]=((clamp(s.spd)-1)<<4)|(clamp(s.con)-1);
+    arr[base+12]=clamp(s.fat)-1;
+  } else {
+    arr[base+11]=((clamp(s.bat)-1)<<4)|(clamp(s.pow)-1);
+    arr[base+12]=((clamp(s.spd)-1)<<4)|(clamp(s.def)-1);
+  }
+  arr[base+13]=player.bh&0xFF; arr[base+14]=player.body&0xFF;
+  arr[base+15]=player.face&0xFF; arr[base+16]=player.legs&0xFF;
+  const gs=player.gameStats||{};
+  if(isPitcherPos(player.pos)){
+    const L=Math.max(0,Math.min(255,gs.losses||0)), S=Math.max(0,Math.min(255,gs.saves||0));
+    const eraRaw=Math.max(0,Math.min(999,gs.eraRaw||0));
+    arr[base+24]=L; arr[base+28]=eraRaw%256;
+    arr[base+29]=(arr[base+29]&0xFE)|(eraRaw>=256?1:0); arr[base+30]=S;
+  } else {
+    const avg=Math.max(0,Math.min(999,gs.avg||0));
+    arr[base+24]=avg%256; arr[base+25]=(arr[base+25]&0xFE)|(avg>=256?1:0);
+    arr[base+26]=Math.max(0,Math.min(255,gs.hr||0));
+    arr[base+28]=Math.max(0,Math.min(255,gs.rbi||0));
+  }
+  return arr.buffer;
+};
+
+const readTeam = (romBuffer, teamName, header=0) => {
+  const offset=TEAM_OFFSETS[teamName]+header;
+  const block=new Uint8Array(romBuffer).slice(offset,offset+800);
+  const starters=[],bench=[],pitchers=[];
+  for(let i=0;i<9;i++) starters.push(readPlayer(block,i));
+  for(let i=9;i<15;i++) bench.push(readPlayer(block,i));
+  for(let i=15;i<25;i++) pitchers.push(readPlayer(block,i));
+  return {starters,bench,pitchers};
+};
+
+const saveTeamToBuffer = (romBuffer, teamName, teamData, header=0) => {
+  const offset=TEAM_OFFSETS[teamName]+header;
+  let buf=romBuffer;
+  for(const p of [...teamData.starters,...teamData.bench,...teamData.pitchers])
+    buf=writePlayer(buf,offset,p);
+  return buf;
+};
+
+// ── SMALL COMPONENTS ──────────────────────────────────────────────────────────
+const statColor = v => v>=9?'#00e676':v>=7?'#69f0ae':v>=5?'#ffab00':v>=3?'#ff7043':'#f44336';
+
+const StatInput = ({value,onChange}) => (
+  <div className="stat-cell">
+    <input className="stat-input" type="number" min={1} max={10} value={value}
+      onChange={e=>onChange(Math.max(1,Math.min(10,parseInt(e.target.value)||1)))} />
+    <div className="stat-bar"><div className="stat-bar-fill" style={{width:`${(value/10)*100}%`,background:statColor(value)}} /></div>
+  </div>
+);
+
+const RawInput = ({value,onChange,width=36}) => (
+  <input className="cell-input raw-input" type="number" min={0} max={255} style={{width}}
+    value={value} onChange={e=>onChange(Math.max(0,Math.min(255,parseInt(e.target.value)||0)))} />
+);
+
+// ── PLAYER ROW ────────────────────────────────────────────────────────────────
+const PlayerRow = ({player,index,onUpdate,onMoveUp,onMoveDown,canMoveUp,canMoveDown,onCopy,onPaste,canPaste}) => {
+  const upd = (f,v) => onUpdate({...player,[f]:v});
+  const updS = (s,v) => onUpdate({...player,stats:{...player.stats,[s]:v}});
+  const updG = (f,v) => onUpdate({...player,gameStats:{...player.gameStats,[f]:v}});
+  const p = isPitcherPos(player.pos);
+  const gs = player.gameStats||{};
+  return (
+    <tr className="player-row">
+      <td>
+        <div className="row-ctrl">
+          <span className="idx-badge">{index+1}</span>
+          <button className="move-btn" onClick={onMoveUp} disabled={!canMoveUp}>▲</button>
+          <button className="move-btn" onClick={onMoveDown} disabled={!canMoveDown}>▼</button>
+          <button className="copy-btn" onClick={onCopy} title="Copy player">C</button>
+          <button className="paste-btn" onClick={onPaste} disabled={!canPaste} title="Paste player">P</button>
+        </div>
+      </td>
+      <td><input className="cell-input initial-input" maxLength={1} value={player.first} onChange={e=>upd('first',e.target.value.toUpperCase())} /></td>
+      <td><input className="cell-input name-input" maxLength={8} value={player.last} onChange={e=>upd('last',e.target.value.toUpperCase())} /></td>
+      <td><select className="pos-select" value={player.pos} onChange={e=>upd('pos',e.target.value)}>{ALL_POSITIONS.map(p=><option key={p} value={p}>{p}</option>)}</select></td>
+      <td><input className="cell-input num-input" type="number" min={0} max={99} value={player.num} onChange={e=>upd('num',Math.max(0,Math.min(99,parseInt(e.target.value)||0)))} /></td>
+      {p ? <>
+        <td><StatInput value={player.stats.spd} onChange={v=>updS('spd',v)} /></td>
+        <td><StatInput value={player.stats.con} onChange={v=>updS('con',v)} /></td>
+        <td><StatInput value={player.stats.fat} onChange={v=>updS('fat',v)} /></td>
+        <td /><td />
+      </> : <>
+        <td><StatInput value={player.stats.bat} onChange={v=>updS('bat',v)} /></td>
+        <td><StatInput value={player.stats.pow} onChange={v=>updS('pow',v)} /></td>
+        <td><StatInput value={player.stats.spd} onChange={v=>updS('spd',v)} /></td>
+        <td><StatInput value={player.stats.def} onChange={v=>updS('def',v)} /></td>
+        <td />
+      </>}
+      <td><select className="bh-select" value={player.bh} onChange={e=>upd('bh',parseInt(e.target.value))}>{BH_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}{!BH_OPTIONS.find(o=>o.value===player.bh)&&<option value={player.bh}>0x{player.bh.toString(16).padStart(2,'0')}</option>}</select></td>
+      <td><RawInput value={player.body} onChange={v=>upd('body',v)} /></td>
+      <td><RawInput value={player.face} onChange={v=>upd('face',v)} /></td>
+      <td><RawInput value={player.legs} onChange={v=>upd('legs',v)} /></td>
+      {p ? <>
+        <td><RawInput value={gs.losses||0} onChange={v=>updG('losses',v)} width={32} /></td>
+        <td><RawInput value={gs.saves||0}  onChange={v=>updG('saves',v)}  width={32} /></td>
+        <td><input className="cell-input" type="number" min={0} max={9.99} step={0.01} style={{width:48}} value={(gs.eraRaw||0)/100} onChange={e=>updG('eraRaw',Math.round(Math.max(0,Math.min(9.99,parseFloat(e.target.value)||0))*100))} /></td>
+      </> : <>
+        <td><input className="cell-input" type="number" min={0} max={0.999} step={0.001} style={{width:52}} value={(gs.avg||0)/1000} onChange={e=>updG('avg',Math.round(Math.max(0,Math.min(0.999,parseFloat(e.target.value)||0))*1000))} /></td>
+        <td><RawInput value={gs.hr||0}  onChange={v=>updG('hr',v)}  width={32} /></td>
+        <td><RawInput value={gs.rbi||0} onChange={v=>updG('rbi',v)} width={36} /></td>
+      </>}
+    </tr>
+  );
+};
+
+// ── PLAYER TABLE + BULK BAR ───────────────────────────────────────────────────
+const HITTER_STAT_LABELS = ['BAT','POW','SPD','DEF'];
+const PITCHER_STAT_LABELS = ['SPD','CON','FAT'];
+
+const BulkBar = ({isPitcher, onApply}) => {
+  const [stat,setStat] = useState(isPitcher?'spd':'bat');
+  const [val,setVal] = useState(5);
+  const stats = isPitcher ? PITCHER_STAT_LABELS : HITTER_STAT_LABELS;
+  return (
+    <div className="bulk-bar">
+      <label>BULK SET:</label>
+      <select className="bulk-select" value={stat} onChange={e=>setStat(e.target.value)}>
+        {stats.map(s=><option key={s} value={s.toLowerCase()}>{s}</option>)}
+      </select>
+      <label>TO</label>
+      <input className="bulk-input" type="number" min={1} max={10} value={val} onChange={e=>setVal(Math.max(1,Math.min(10,parseInt(e.target.value)||1)))} />
+      <button className="btn-amber" onClick={()=>onApply(stat,val)}>APPLY ALL</button>
+    </div>
+  );
+};
+
+const PlayerTable = ({players,onUpdate,onMove,isPitcherSection,copiedPlayer,onCopy,onPaste}) => (
+  <div>
+    <BulkBar isPitcher={isPitcherSection} onApply={(stat,val)=>{
+      players.forEach((_,i)=>onUpdate(i,{...players[i],stats:{...players[i].stats,[stat]:val}}));
+    }} />
+    <table className="player-table">
+      <thead><tr>
+        <th style={{width:90}}></th>
+        <th style={{width:20}}>F.</th><th>LAST NAME</th>
+        <th style={{width:50}}>POS</th><th style={{width:40}}>#</th>
+        {isPitcherSection?<><th className="stat-col" style={{width:76}}>SPD</th><th className="stat-col" style={{width:76}}>CON</th><th className="stat-col" style={{width:76}}>FAT</th><th/><th/></>
+          :<><th className="stat-col" style={{width:76}}>BAT</th><th className="stat-col" style={{width:76}}>POW</th><th className="stat-col" style={{width:76}}>SPD</th><th className="stat-col" style={{width:76}}>DEF</th><th/></>}
+        <th style={{width:56}}>B/T</th><th style={{width:44}}>BODY</th><th style={{width:44}}>FACE</th><th style={{width:44}}>LEGS</th>
+        {isPitcherSection?<><th style={{width:36}}>L</th><th style={{width:36}}>S</th><th style={{width:52}}>ERA</th></>
+          :<><th style={{width:52}}>AVG</th><th style={{width:36}}>HR</th><th style={{width:40}}>RBI</th></>}
+      </tr></thead>
+      <tbody>
+        {players.map((p,i)=>(
+          <PlayerRow key={i} player={p} index={i}
+            onUpdate={u=>onUpdate(i,u)}
+            onMoveUp={()=>onMove(i,i-1)} onMoveDown={()=>onMove(i,i+1)}
+            canMoveUp={i>0} canMoveDown={i<players.length-1}
+            onCopy={()=>onCopy(p)}
+            onPaste={()=>onPaste(i)}
+            canPaste={!!copiedPlayer}
+          />
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
+// ── COMPARE VIEW ──────────────────────────────────────────────────────────────
+const CompareView = ({romBuffer, romHeader}) => {
+  const [teamA,setTeamA]=useState(ALL_TEAMS[0]);
+  const [teamB,setTeamB]=useState(ALL_TEAMS[1]);
+  const dataA = useMemo(()=>romBuffer?readTeam(romBuffer,teamA,romHeader):null,[romBuffer,teamA,romHeader]);
+  const dataB = useMemo(()=>romBuffer?readTeam(romBuffer,teamB,romHeader):null,[romBuffer,teamB,romHeader]);
+  if(!romBuffer) return <div className="no-rom"><div className="no-rom-icon">⚾</div><span>LOAD A ROM FIRST</span></div>;
+  const renderSection=(data,section,label)=>(
+    <div>
+      <div className="section-label">{label}</div>
+      <table className="player-table">
+        <thead><tr><th>F.</th><th>LAST</th><th>POS</th><th>#</th><th>BAT</th><th>POW</th><th>SPD</th><th>DEF</th></tr></thead>
+        <tbody>{(data[section]||[]).map((p,i)=>(
+          <tr key={i} className="player-row">
+            <td style={{fontSize:12}}>{p.first}</td>
+            <td style={{fontSize:12}}>{p.last}</td>
+            <td style={{fontSize:11,color:'var(--text-dim)'}}>{p.pos}</td>
+            <td style={{fontSize:11,color:'var(--text-muted)'}}>{p.num}</td>
+            {isPitcherPos(p.pos)?<>
+              <td style={{textAlign:'center',color:statColor(p.stats.spd),fontSize:12}}>{p.stats.spd}</td>
+              <td style={{textAlign:'center',color:statColor(p.stats.con),fontSize:12}}>{p.stats.con}</td>
+              <td style={{textAlign:'center',color:statColor(p.stats.fat),fontSize:12}}>{p.stats.fat}</td>
+              <td/></>
+            :<>
+              <td style={{textAlign:'center',color:statColor(p.stats.bat),fontSize:12}}>{p.stats.bat}</td>
+              <td style={{textAlign:'center',color:statColor(p.stats.pow),fontSize:12}}>{p.stats.pow}</td>
+              <td style={{textAlign:'center',color:statColor(p.stats.spd),fontSize:12}}>{p.stats.spd}</td>
+              <td style={{textAlign:'center',color:statColor(p.stats.def),fontSize:12}}>{p.stats.def}</td>
+            </>}
+          </tr>))}
+        </tbody>
+      </table>
+    </div>
+  );
+  return (
+    <div className="compare-layout">
+      {[[teamA,setTeamA,dataA],[teamB,setTeamB,dataB]].map(([team,setTeam,data],idx)=>(
+        <div key={idx} className="compare-pane">
+          <div className="compare-selector">
+            <select className="compare-select" value={team} onChange={e=>setTeam(e.target.value)}>
+              {ALL_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          {data&&<>
+            {renderSection(data,'starters','STARTERS')}
+            {renderSection(data,'bench','BENCH')}
+            {renderSection(data,'pitchers','PITCHERS')}
+          </>}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
+const MAX_HISTORY = 30;
+
+const App = () => {
+  const [romBuffer,setRomBuffer]=useState(null);
+  const [romName,setRomName]=useState('');
+  const [romHeader,setRomHeader]=useState(0);
+  const [selectedTeam,setSelectedTeam]=useState(null);
+  const [teamData,setTeamData]=useState(null);
+  const [dragOver,setDragOver]=useState(false);
+  const [toast,setToast]=useState(null);
+  const [dirty,setDirty]=useState(false);
+  const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
+  const [copiedPlayer,setCopiedPlayer]=useState(null);
+  const [view,setView]=useState('edit'); // 'edit' | 'compare'
+  const [searchQuery,setSearchQuery]=useState('');
+  const [showSearch,setShowSearch]=useState(false);
+  // Undo/redo
+  const [history,setHistory]=useState([]); // array of teamData snapshots
+  const [historyIdx,setHistoryIdx]=useState(-1);
+  const fileInputRef=useRef();
+  const searchRef=useRef();
+
+  const showToast=(msg,type='ok')=>{setToast({msg,type});setTimeout(()=>setToast(null),3000);};
+
+  // ── UNDO/REDO ──
+  const pushHistory = useCallback((data) => {
+    setHistory(prev=>{
+      const base=prev.slice(0,historyIdx+1);
+      const next=[...base,JSON.parse(JSON.stringify(data))].slice(-MAX_HISTORY);
+      setHistoryIdx(next.length-1);
+      return next;
+    });
+  },[historyIdx]);
+
+  const undo = () => {
+    if(historyIdx<=0){showToast('Nothing to undo','warn');return;}
+    const idx=historyIdx-1;
+    setTeamData(JSON.parse(JSON.stringify(history[idx])));
+    setHistoryIdx(idx);
+    setDirty(true);
+  };
+  const redo = () => {
+    if(historyIdx>=history.length-1){showToast('Nothing to redo','warn');return;}
+    const idx=historyIdx+1;
+    setTeamData(JSON.parse(JSON.stringify(history[idx])));
+    setHistoryIdx(idx);
+    setDirty(true);
+  };
+
+  // ── ROM LOAD ──
+  const loadRom = file => {
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const buf=e.target.result;
+      if(buf.byteLength<1300000){showToast('File too small -- not a valid KGJ ROM','error');return;}
+      // Detect 512-byte copier header: headerless ROMs are exact multiples of 1024 bytes
+      const header = (buf.byteLength % 1024 === 512) ? 512 : 0;
+      setRomHeader(header);
+      setRomBuffer(buf); setRomName(file.name);
+      setSelectedTeam(null); setTeamData(null);
+      setDirty(false); setHistory([]); setHistoryIdx(-1);
+      setCopiedPlayer(null);
+      showToast(`ROM loaded${header ? ' (512-byte header detected)' : ''}`);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // ── TEAM SELECT ──
+  const selectTeam = name => {
+    if(dirty&&!window.confirm('Unsaved changes on this team. Switch anyway?'))return;
+    setSelectedTeam(name);
+    const data=readTeam(romBuffer,name,romHeader);
+    setTeamData(data);
+    setDirty(false);
+    setHistory([JSON.parse(JSON.stringify(data))]);
+    setHistoryIdx(0);
+  };
+
+  // ── UPDATE ──
+  const updateSection = (section,index,updated) => {
+    setTeamData(prev=>{
+      const arr=[...prev[section]]; arr[index]=updated;
+      const next={...prev,[section]:arr};
+      pushHistory(next);
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const moveInSection = (section,from,to) => {
+    if(to<0||to>=(teamData[section]||[]).length)return;
+    setTeamData(prev=>{
+      const arr=[...prev[section]];
+      const [moved]=arr.splice(from,1); arr.splice(to,0,moved);
+      const offsets={starters:0,bench:9,pitchers:15};
+      arr.forEach((p,i)=>{arr[i]={...p,slotIndex:offsets[section]+i};});
+      const next={...prev,[section]:arr};
+      pushHistory(next);
+      return next;
+    });
+    setDirty(true);
+  };
+
+  // ── COPY/PASTE ──
+  const handleCopy = player => {
+    setCopiedPlayer(JSON.parse(JSON.stringify(player)));
+    showToast(`Copied ${player.first} ${player.last}`);
+  };
+
+  const handlePaste = (section,index) => {
+    if(!copiedPlayer)return;
+    const target=teamData[section][index];
+    const pasted={...JSON.parse(JSON.stringify(copiedPlayer)), slotIndex:target.slotIndex, pos:target.pos};
+    updateSection(section,index,pasted);
+    showToast(`Pasted onto slot ${index+1}`);
+  };
+
+  // ── SAVE / EXPORT ──
+  const saveTeam = () => {
+    if(!romBuffer||!selectedTeam||!teamData)return;
+    const buf=saveTeamToBuffer(romBuffer,selectedTeam,teamData,romHeader);
+    setRomBuffer(buf); setDirty(false);
+    showToast(`${selectedTeam} saved to ROM`);
+  };
+
+  const exportRom = () => {
+    if(!romBuffer)return;
+    const blob=new Blob([romBuffer],{type:'application/octet-stream'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url;
+    a.download=romName.replace(/\.(smc|sfc|rom)$/i,'')+'_edited.smc';
+    a.click(); URL.revokeObjectURL(url);
+    showToast('ROM exported');
+  };
+
+  const exportCSV = () => {
+    if(!teamData)return;
+    const rows=[['Section','First','Last','Pos','#','BH','Body','Face','Legs','Stat1','Stat2','Stat3','Stat4','GameStat1','GameStat2','GameStat3']];
+    const addRows=(section,label)=>teamData[section].forEach(p=>{
+      const gs=p.gameStats||{};
+      const isPitch=isPitcherPos(p.pos);
+      rows.push([label,p.first,p.last,p.pos,p.num,bh_to_label(p.bh),p.body,p.face,p.legs,
+        isPitch?`SPD=${p.stats.spd}`:`BAT=${p.stats.bat}`,
+        isPitch?`CON=${p.stats.con}`:`POW=${p.stats.pow}`,
+        isPitch?`FAT=${p.stats.fat}`:`SPD=${p.stats.spd}`,
+        isPitch?'':`DEF=${p.stats.def}`,
+        isPitch?`L=${gs.losses||0}`:`AVG=${((gs.avg||0)/1000).toFixed(3)}`,
+        isPitch?`S=${gs.saves||0}`:`HR=${gs.hr||0}`,
+        isPitch?`ERA=${((gs.eraRaw||0)/100).toFixed(2)}`:`RBI=${gs.rbi||0}`,
+      ]);
+    });
+    addRows('starters','Starter'); addRows('bench','Bench'); addRows('pitchers','Pitcher');
+    const blob=new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a');
+    a.href=url; a.download=`${selectedTeam.replace(/ /g,'_')}_roster.csv`;
+    a.click(); URL.revokeObjectURL(url);
+    showToast('CSV exported');
+  };
+
+  // ── SEARCH ──
+  const searchResults = useMemo(()=>{
+    if(!romBuffer||!searchQuery||searchQuery.length<2)return[];
+    const q=searchQuery.toUpperCase();
+    const results=[];
+    for(const teamName of ALL_TEAMS){
+      const data=readTeam(romBuffer,teamName,romHeader);
+      const sections=[['starters','S'],['bench','B'],['pitchers','P']];
+      for(const [sec,label] of sections){
+        for(const player of data[sec]){
+          if(player.last.includes(q)||player.first.includes(q)){
+            results.push({teamName,player,section:sec,label});
+            if(results.length>=20)return results;
+          }
+        }
+      }
+    }
+    return results;
+  },[romBuffer,searchQuery]);
+
+  const handleSearchSelect = (result) => {
+    setSearchQuery('');
+    setShowSearch(false);
+    setView('edit');
+    selectTeam(result.teamName);
+  };
+
+  // ── EJECT ──
+  const ejectRom = () => {
+    if(dirty){
+      const choice=window.confirm('You have unsaved changes on ' + selectedTeam + '.\n\nClick OK to eject without saving, or Cancel to go back and save first.');
+      if(!choice)return;
+    }
+    setRomBuffer(null); setRomName(''); setRomHeader(0);
+    setSelectedTeam(null); setTeamData(null);
+    setDirty(false); setHistory([]); setHistoryIdx(-1);
+    setCopiedPlayer(null);
+    showToast('ROM ejected');
+  };
+
+  return (
+    <div>
+      {/* HEADER */}
+      <div className="header">
+        <div>
+          <div className="header-title">KGJ MLB EDITOR</div>
+          <div className="header-sub">KEN GRIFFEY JR. · SNES</div>
+        </div>
+
+        <div className="header-center">
+          <div className="view-tabs" style={{borderBottom:'none',marginBottom:0}}>
+            <button className={`view-tab ${view==='edit'?'active':''}`} onClick={()=>setView('edit')}>EDIT</button>
+            <button className={`view-tab ${view==='compare'?'active':''}`} onClick={()=>setView('compare')}>COMPARE</button>
+          </div>
+          <div style={{position:'relative'}}>
+            <div className="header-search" onClick={()=>searchRef.current&&searchRef.current.focus()}>
+              <span className="search-icon">🔍</span>
+              <input ref={searchRef} placeholder="Search players..." value={searchQuery}
+                onChange={e=>{setSearchQuery(e.target.value);setShowSearch(true);}}
+                onFocus={()=>setShowSearch(true)}
+                onBlur={()=>setTimeout(()=>setShowSearch(false),200)} />
+            </div>
+            {showSearch&&searchResults.length>0&&(
+              <div className="search-results">
+                {searchResults.map((r,i)=>(
+                  <div key={i} className="search-result-item" onMouseDown={()=>handleSearchSelect(r)}>
+                    <span className="search-result-team">{r.teamName}</span>
+                    <span className="search-result-pos">{r.player.pos}</span>
+                    <span className="search-result-name">{r.player.first} {r.player.last}</span>
+                    <span className="search-result-section">#{r.player.num} · {r.label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="header-status">
+          <div className={`status-dot ${romBuffer?'active':''}`} />
+          <span style={{maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{romBuffer?romName:'NO ROM LOADED'}</span>
+          {dirty&&<span style={{color:'var(--amber)'}}>● UNSAVED</span>}
+          {romBuffer&&(
+            <button className="btn-sm" onClick={ejectRom} style={{fontSize:10,padding:'3px 10px',borderColor:'var(--red)',color:'var(--red)'}} title="Eject ROM">⏏ EJECT</button>
+          )}
+        </div>
+      </div>
+
+      {/* ACTION BAR */}
+      <div className="action-bar">
+        <button className="btn primary" onClick={saveTeam} disabled={!selectedTeam||!dirty} style={{opacity:(!selectedTeam||!dirty)?0.4:1}}>SAVE TEAM</button>
+        <button className="btn primary" onClick={exportRom} disabled={!romBuffer} style={{opacity:!romBuffer?0.4:1}}>EXPORT ROM</button>
+        <button className="btn" onClick={exportCSV} disabled={!teamData} style={{opacity:!teamData?0.4:1}}>EXPORT CSV</button>
+        <div className="action-bar-sep" />
+        <button className="btn" onClick={()=>{if(selectedTeam){setTeamData(readTeam(romBuffer,selectedTeam,romHeader));setDirty(false);setHistory([]);setHistoryIdx(-1);showToast('Reverted');}}} disabled={!selectedTeam} style={{opacity:!selectedTeam?0.4:1}}>REVERT</button>
+        <div className="undo-redo" style={{display:'flex',gap:4}}>
+          <button className="btn-sm" onClick={undo} disabled={historyIdx<=0}>↩ UNDO</button>
+          <button className="btn-sm" onClick={redo} disabled={historyIdx>=history.length-1}>REDO ↪</button>
+        </div>
+        {copiedPlayer&&<><div className="action-bar-sep"/><span className="action-bar-clip">📋 {copiedPlayer.first} {copiedPlayer.last}</span><button className="btn-sm" onClick={()=>setCopiedPlayer(null)} style={{fontSize:10,padding:'3px 8px'}}>CLEAR</button></>}
+      </div>
+
+      {/* BODY */}
+      {view==='compare' ? (
+        <div style={{height:'calc(100vh - 92px)',overflow:'hidden'}}>
+          <CompareView romBuffer={romBuffer} romHeader={romHeader} />
+        </div>
+      ) : (
+        <div className="app">
+          {/* SIDEBAR */}
+          <div className={`sidebar ${sidebarCollapsed?'collapsed':''}`}>
+            <button className="sidebar-toggle" onClick={()=>setSidebarCollapsed(c=>!c)} title={sidebarCollapsed?'Show teams':'Hide teams'}>
+              {sidebarCollapsed?'▶':'◀'}
+            </button>
+            {Object.entries(TEAMS_STRUCTURE).map(([league,divisions])=>(
+              <div key={league}>
+                <div className="league-header">{league}</div>
+                {Object.entries(divisions).map(([div,teams])=>(
+                  <div key={div}>
+                    <div className="division-header">{div}</div>
+                    {teams.map(team=>(
+                      <button key={team} className={`team-btn ${selectedTeam===team?'active':''}`}
+                        onClick={()=>romBuffer&&selectTeam(team)} style={{opacity:romBuffer?1:0.4}}>
+                        {team}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {/* MAIN */}
+          <div className="main">
+            {!romBuffer?(
+              <div className={`dropzone ${dragOver?'drag-over':''}`}
+                onDrop={e=>{e.preventDefault();setDragOver(false);if(e.dataTransfer.files[0])loadRom(e.dataTransfer.files[0]);}}
+                onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+                onDragLeave={()=>setDragOver(false)}
+                onClick={()=>fileInputRef.current.click()}>
+                <div className="dropzone-icon">💾</div>
+                <h2>LOAD ROM</h2>
+                <p className="drop-hint">Drag and drop your ROM file here<br/>or click to browse</p>
+                <p className="drop-sub">Ken Griffey Jr. Presents Major League Baseball (U).smc / .sfc</p>
+                <input ref={fileInputRef} type="file" accept=".smc,.sfc,.rom" style={{display:'none'}} onChange={e=>{if(e.target.files[0])loadRom(e.target.files[0]);}} />
+              </div>
+            ):!selectedTeam?(
+              <div className="no-rom"><div className="no-rom-icon">⚾</div><span>SELECT A TEAM FROM THE SIDEBAR</span></div>
+            ):teamData&&(
+              <div className="team-panel">
+                <div className="team-header">
+                  <div className="team-name">{selectedTeam}</div>
+                  <div className="team-meta">{dirty?'MODIFIED':'UNMODIFIED'}</div>
+                </div>
+
+                {[['starters','STARTERS'],['bench','BENCH'],['pitchers','PITCHERS']].map(([sec,label])=>(
+                  <div key={sec}>
+                    <div className="section-label">{label}</div>
+                    <PlayerTable
+                      players={teamData[sec]}
+                      isPitcherSection={sec==='pitchers'}
+                      copiedPlayer={copiedPlayer}
+                      onUpdate={(i,p)=>updateSection(sec,i,p)}
+                      onMove={(f,t)=>moveInSection(sec,f,t)}
+                      onCopy={handleCopy}
+                      onPaste={i=>handlePaste(sec,i)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {toast&&<div className={`toast ${toast.type==='error'?'error':toast.type==='warn'?'warn':''}`}>{toast.msg}</div>}
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
