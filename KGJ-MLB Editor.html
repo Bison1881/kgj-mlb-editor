@@ -141,6 +141,8 @@
   .paste-btn { background:none; border:1px solid var(--border); color:var(--text-muted); width:18px; height:18px; border-radius:2px; cursor:pointer; font-size:9px; display:flex; align-items:center; justify-content:center; transition:all 0.1s; flex-shrink:0; }
   .paste-btn:hover:not(:disabled) { border-color:var(--blue); color:var(--blue); }
   .paste-btn:disabled { opacity:0.2; cursor:default; }
+  .trade-btn { background:none; border:1px solid var(--border); color:var(--text-muted); width:18px; height:18px; border-radius:2px; cursor:pointer; font-size:9px; display:flex; align-items:center; justify-content:center; transition:all 0.1s; flex-shrink:0; }
+  .trade-btn:hover { border-color:var(--green); color:var(--green); }
   .idx-badge { display:inline-block; font-size:9px; color:var(--text-muted); width:14px; text-align:right; }
 
   /* TOOLBAR */
@@ -183,7 +185,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useRef, useCallback, useMemo } = React;
+const { useState, useRef, useMemo } = React;
 
 // ── ENCODING ──────────────────────────────────────────────────────────────────
 const encodeLetter = ch => ch.toUpperCase().charCodeAt(0) - 65 + 0x0B;
@@ -287,6 +289,25 @@ const saveTeamToBuffer = (romBuffer, teamName, teamData, header=0) => {
   return buf;
 };
 
+// ── CHECKSUM ─────────────────────────────────────────────────────────────────
+const fixChecksum = (romBuffer, header=0) => {
+  const arr = new Uint8Array(romBuffer);
+  // LoROM internal header at 0x7FC0 in ROM space; checksum fields at 0x7FDC-0x7FDF
+  const base = header + 0x7FDC;
+  // Per SNES spec: treat the four checksum bytes as 0xFF each during summation,
+  // then sum all ROM data bytes (excluding any copier header)
+  arr[base]=0xFF; arr[base+1]=0xFF; arr[base+2]=0xFF; arr[base+3]=0xFF;
+  let sum = 0;
+  for(let i = header; i < arr.length; i++) sum = (sum + arr[i]) & 0xFFFF;
+  const complement = (sum ^ 0xFFFF) & 0xFFFF;
+  // Complement at 0x7FDC-0x7FDD, checksum at 0x7FDE-0x7FDF (little-endian)
+  arr[base]   = complement & 0xFF;
+  arr[base+1] = (complement >> 8) & 0xFF;
+  arr[base+2] = sum & 0xFF;
+  arr[base+3] = (sum >> 8) & 0xFF;
+  return arr.buffer;
+};
+
 // ── SMALL COMPONENTS ──────────────────────────────────────────────────────────
 const statColor = v => v>=9?'#00e676':v>=7?'#69f0ae':v>=5?'#ffab00':v>=3?'#ff7043':'#f44336';
 
@@ -304,21 +325,22 @@ const RawInput = ({value,onChange,width=36}) => (
 );
 
 // ── PLAYER ROW ────────────────────────────────────────────────────────────────
-const PlayerRow = ({player,index,onUpdate,onMoveUp,onMoveDown,canMoveUp,canMoveDown,onCopy,onPaste,canPaste}) => {
+const PlayerRow = ({player,index,onUpdate,onMoveUp,onMoveDown,canMoveUp,canMoveDown,onCopy,onTrade,onPaste,isSource,canPaste}) => {
   const upd = (f,v) => onUpdate({...player,[f]:v});
   const updS = (s,v) => onUpdate({...player,stats:{...player.stats,[s]:v}});
   const updG = (f,v) => onUpdate({...player,gameStats:{...player.gameStats,[f]:v}});
   const p = isPitcherPos(player.pos);
   const gs = player.gameStats||{};
   return (
-    <tr className="player-row">
+    <tr className="player-row" style={isSource?{background:'rgba(0,230,118,0.06)',outline:'1px solid rgba(0,230,118,0.25)'}:{}}>
       <td>
         <div className="row-ctrl">
           <span className="idx-badge">{index+1}</span>
           <button className="move-btn" onClick={onMoveUp} disabled={!canMoveUp}>▲</button>
           <button className="move-btn" onClick={onMoveDown} disabled={!canMoveDown}>▼</button>
-          <button className="copy-btn" onClick={onCopy} title="Copy player">C</button>
-          <button className="paste-btn" onClick={onPaste} disabled={!canPaste} title="Paste player">P</button>
+          <button className="copy-btn" onClick={onCopy} title="Copy (overwrite target)">C</button>
+          <button className="trade-btn" onClick={onTrade} title="Trade (swap with target)">T</button>
+          {canPaste&&!isSource&&<button className="paste-btn" onClick={onPaste} title="Paste here">P</button>}
         </div>
       </td>
       <td><input className="cell-input initial-input" maxLength={1} value={player.first} onChange={e=>upd('first',e.target.value.toUpperCase())} /></td>
@@ -375,14 +397,16 @@ const BulkBar = ({isPitcher, onApply}) => {
   );
 };
 
-const PlayerTable = ({players,onUpdate,onMove,isPitcherSection,copiedPlayer,onCopy,onPaste}) => (
+const PlayerTable = ({players,onUpdate,onMove,isPitcherSection,clipboard,section,selectedTeam,onCopy,onTrade,onPaste}) => {
+  const sourceSlotIndex = clipboard ? clipboard.player.slotIndex : null;
+  return (
   <div>
     <BulkBar isPitcher={isPitcherSection} onApply={(stat,val)=>{
       players.forEach((_,i)=>onUpdate(i,{...players[i],stats:{...players[i].stats,[stat]:val}}));
     }} />
     <table className="player-table">
       <thead><tr>
-        <th style={{width:90}}></th>
+        <th style={{width:108}}></th>
         <th style={{width:20}}>F.</th><th>LAST NAME</th>
         <th style={{width:50}}>POS</th><th style={{width:40}}>#</th>
         {isPitcherSection?<><th className="stat-col" style={{width:76}}>SPD</th><th className="stat-col" style={{width:76}}>CON</th><th className="stat-col" style={{width:76}}>FAT</th><th/><th/></>
@@ -397,15 +421,18 @@ const PlayerTable = ({players,onUpdate,onMove,isPitcherSection,copiedPlayer,onCo
             onUpdate={u=>onUpdate(i,u)}
             onMoveUp={()=>onMove(i,i-1)} onMoveDown={()=>onMove(i,i+1)}
             canMoveUp={i>0} canMoveDown={i<players.length-1}
-            onCopy={()=>onCopy(p)}
-            onPaste={()=>onPaste(i)}
-            canPaste={!!copiedPlayer}
+            onCopy={()=>onCopy(p,section)}
+            onTrade={()=>onTrade(p,section)}
+            onPaste={()=>onPaste(section,i)}
+            isSource={!!clipboard && p.slotIndex === sourceSlotIndex && clipboard.sourceSection === section && clipboard.sourceTeam === selectedTeam}
+            canPaste={!!clipboard}
           />
         ))}
       </tbody>
     </table>
   </div>
-);
+  );
+};
 
 // ── COMPARE VIEW ──────────────────────────────────────────────────────────────
 const CompareView = ({romBuffer, romHeader}) => {
@@ -474,7 +501,7 @@ const App = () => {
   const [toast,setToast]=useState(null);
   const [dirty,setDirty]=useState(false);
   const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
-  const [copiedPlayer,setCopiedPlayer]=useState(null);
+  const [clipboard,setClipboard]=useState(null); // {player, mode, sourceTeam, sourceSection}
   const [view,setView]=useState('edit'); // 'edit' | 'compare'
   const [searchQuery,setSearchQuery]=useState('');
   const [showSearch,setShowSearch]=useState(false);
@@ -487,19 +514,22 @@ const App = () => {
   const showToast=(msg,type='ok')=>{setToast({msg,type});setTimeout(()=>setToast(null),3000);};
 
   // ── UNDO/REDO ──
-  const pushHistory = useCallback((data) => {
+  const histIdxRef = useRef(-1);
+  const pushHistory = (data) => {
     setHistory(prev=>{
-      const base=prev.slice(0,historyIdx+1);
+      const base=prev.slice(0,histIdxRef.current+1);
       const next=[...base,JSON.parse(JSON.stringify(data))].slice(-MAX_HISTORY);
+      histIdxRef.current=next.length-1;
       setHistoryIdx(next.length-1);
       return next;
     });
-  },[historyIdx]);
+  };
 
   const undo = () => {
     if(historyIdx<=0){showToast('Nothing to undo','warn');return;}
     const idx=historyIdx-1;
     setTeamData(JSON.parse(JSON.stringify(history[idx])));
+    histIdxRef.current=idx;
     setHistoryIdx(idx);
     setDirty(true);
   };
@@ -507,6 +537,7 @@ const App = () => {
     if(historyIdx>=history.length-1){showToast('Nothing to redo','warn');return;}
     const idx=historyIdx+1;
     setTeamData(JSON.parse(JSON.stringify(history[idx])));
+    histIdxRef.current=idx;
     setHistoryIdx(idx);
     setDirty(true);
   };
@@ -522,22 +553,31 @@ const App = () => {
       setRomHeader(header);
       setRomBuffer(buf); setRomName(file.name);
       setSelectedTeam(null); setTeamData(null);
-      setDirty(false); setHistory([]); setHistoryIdx(-1);
-      setCopiedPlayer(null);
+      setDirty(false); setHistory([]); histIdxRef.current=-1; setHistoryIdx(-1);
+      setClipboard(null);
       showToast(`ROM loaded${header ? ' (512-byte header detected)' : ''}`);
     };
     reader.readAsArrayBuffer(file);
   };
 
   // ── TEAM SELECT ──
-  const selectTeam = name => {
-    if(dirty&&!window.confirm('Unsaved changes on this team. Switch anyway?'))return;
+  const selectTeam = (name, currentBuf) => {
+    const bufToUse = currentBuf || romBuffer;
+    let buf = bufToUse;
+    // Auto-save current team before switching so no edits are lost
+    if(dirty && selectedTeam && teamData) {
+      buf = saveTeamToBuffer(buf, selectedTeam, teamData, romHeader);
+      buf = fixChecksum(buf, romHeader);
+      setRomBuffer(buf);
+    }
     setSelectedTeam(name);
-    const data=readTeam(romBuffer,name,romHeader);
+    const data=readTeam(buf,name,romHeader);
     setTeamData(data);
     setDirty(false);
+    histIdxRef.current=0;
     setHistory([JSON.parse(JSON.stringify(data))]);
     setHistoryIdx(0);
+    // Clipboard intentionally preserved across team switches
   };
 
   // ── UPDATE ──
@@ -565,31 +605,90 @@ const App = () => {
     setDirty(true);
   };
 
-  // ── COPY/PASTE ──
-  const handleCopy = player => {
-    setCopiedPlayer(JSON.parse(JSON.stringify(player)));
-    showToast(`Copied ${player.first} ${player.last}`);
+  // ── COPY / TRADE / PASTE ──
+  const handleCopy = (player, section) => {
+    setClipboard({player: JSON.parse(JSON.stringify(player)), mode: 'copy', sourceTeam: selectedTeam, sourceSection: section});
+    showToast(`Copy: ${player.first} ${player.last} — click P on target`);
   };
 
-  const handlePaste = (section,index) => {
-    if(!copiedPlayer)return;
-    const target=teamData[section][index];
-    const pasted={...JSON.parse(JSON.stringify(copiedPlayer)), slotIndex:target.slotIndex, pos:target.pos};
-    updateSection(section,index,pasted);
-    showToast(`Pasted onto slot ${index+1}`);
+  const handleTrade = (player, section) => {
+    setClipboard({player: JSON.parse(JSON.stringify(player)), mode: 'trade', sourceTeam: selectedTeam, sourceSection: section});
+    showToast(`Trade: ${player.first} ${player.last} — click P on target`);
+  };
+
+  const handlePaste = (section, index) => {
+    if(!clipboard)return;
+    const { player: src, mode, sourceTeam, sourceSection } = clipboard;
+    const target = teamData[section][index];
+    if(mode === 'copy') {
+      const pasted = {...JSON.parse(JSON.stringify(src)), slotIndex: target.slotIndex, pos: target.pos};
+      updateSection(section, index, pasted);
+      showToast(`Pasted ${src.first} ${src.last} onto slot ${index+1}`);
+      // keep clipboard active for multi-paste
+    } else {
+      // Trade
+      const crossTeam = sourceTeam !== selectedTeam;
+      const incoming = {...JSON.parse(JSON.stringify(src)), slotIndex: target.slotIndex, pos: target.pos};
+      if(crossTeam) {
+        // Write incoming to current team
+        const updatedCurrent = {...teamData};
+        const secArr = [...updatedCurrent[section]];
+        secArr[index] = incoming;
+        updatedCurrent[section] = secArr;
+        let buf = saveTeamToBuffer(romBuffer, selectedTeam, updatedCurrent, romHeader);
+        // Write displaced player back to source team
+        const srcTeamData = readTeam(buf, sourceTeam, romHeader);
+        const srcSecArr = [...srcTeamData[sourceSection]];
+        const srcIndex = srcSecArr.findIndex(p => p.slotIndex === src.slotIndex);
+        if(srcIndex !== -1) {
+          const displaced = {...JSON.parse(JSON.stringify(target)), slotIndex: src.slotIndex, pos: src.pos};
+          srcSecArr[srcIndex] = displaced;
+          srcTeamData[sourceSection] = srcSecArr;
+          buf = saveTeamToBuffer(buf, sourceTeam, srcTeamData, romHeader);
+        }
+        buf = fixChecksum(buf, romHeader);
+        setRomBuffer(buf);
+        setTeamData(updatedCurrent);
+        pushHistory(updatedCurrent);
+        setDirty(false);
+        setClipboard(null);
+        showToast(`Traded: ${incoming.first} ${incoming.last} → ${selectedTeam} ↔ ${target.first} ${target.last} → ${sourceTeam}`);
+      } else {
+        // Same-team trade
+        const srcIndex = teamData[sourceSection].findIndex(p => p.slotIndex === src.slotIndex);
+        if(srcIndex === -1) { showToast('Source slot not found','warn'); return; }
+        const displaced = {...JSON.parse(JSON.stringify(target)), slotIndex: src.slotIndex, pos: src.pos};
+        setTeamData(prev => {
+          const next = {...prev};
+          const destArr = [...prev[section]]; destArr[index] = incoming; next[section] = destArr;
+          if(sourceSection === section) {
+            destArr[srcIndex] = displaced;
+          } else {
+            const srcArr = [...prev[sourceSection]]; srcArr[srcIndex] = displaced; next[sourceSection] = srcArr;
+          }
+          pushHistory(next);
+          return next;
+        });
+        setDirty(true);
+        setClipboard(null);
+        showToast(`Traded: ${incoming.first} ${incoming.last} ↔ ${displaced.first} ${displaced.last}`);
+      }
+    }
   };
 
   // ── SAVE / EXPORT ──
   const saveTeam = () => {
     if(!romBuffer||!selectedTeam||!teamData)return;
-    const buf=saveTeamToBuffer(romBuffer,selectedTeam,teamData,romHeader);
+    let buf=saveTeamToBuffer(romBuffer,selectedTeam,teamData,romHeader);
+    buf=fixChecksum(buf,romHeader);
     setRomBuffer(buf); setDirty(false);
     showToast(`${selectedTeam} saved to ROM`);
   };
 
   const exportRom = () => {
     if(!romBuffer)return;
-    const blob=new Blob([romBuffer],{type:'application/octet-stream'});
+    const exportBuf=fixChecksum(romBuffer,romHeader);
+    const blob=new Blob([exportBuf],{type:'application/octet-stream'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a'); a.href=url;
     a.download=romName.replace(/\.(smc|sfc|rom)$/i,'')+'_edited.smc';
@@ -656,8 +755,8 @@ const App = () => {
     }
     setRomBuffer(null); setRomName(''); setRomHeader(0);
     setSelectedTeam(null); setTeamData(null);
-    setDirty(false); setHistory([]); setHistoryIdx(-1);
-    setCopiedPlayer(null);
+    setDirty(false); setHistory([]); histIdxRef.current=-1; setHistoryIdx(-1);
+    setClipboard(null);
     showToast('ROM ejected');
   };
 
@@ -719,7 +818,7 @@ const App = () => {
           <button className="btn-sm" onClick={undo} disabled={historyIdx<=0}>↩ UNDO</button>
           <button className="btn-sm" onClick={redo} disabled={historyIdx>=history.length-1}>REDO ↪</button>
         </div>
-        {copiedPlayer&&<><div className="action-bar-sep"/><span className="action-bar-clip">📋 {copiedPlayer.first} {copiedPlayer.last}</span><button className="btn-sm" onClick={()=>setCopiedPlayer(null)} style={{fontSize:10,padding:'3px 8px'}}>CLEAR</button></>}
+        {clipboard&&<><div className="action-bar-sep"/><span className="action-bar-clip">{clipboard.mode==='trade'?'⇄':'📋'} {clipboard.player.first} {clipboard.player.last}{clipboard.sourceTeam!==selectedTeam?` (${clipboard.sourceTeam})`:''} [{clipboard.mode.toUpperCase()}]</span><button className="btn-sm" onClick={()=>setClipboard(null)} style={{fontSize:10,padding:'3px 8px'}}>CLEAR</button></>}
       </div>
 
       {/* BODY */}
@@ -781,11 +880,14 @@ const App = () => {
                     <PlayerTable
                       players={teamData[sec]}
                       isPitcherSection={sec==='pitchers'}
-                      copiedPlayer={copiedPlayer}
+                      clipboard={clipboard}
+                      section={sec}
+                      selectedTeam={selectedTeam}
                       onUpdate={(i,p)=>updateSection(sec,i,p)}
                       onMove={(f,t)=>moveInSection(sec,f,t)}
                       onCopy={handleCopy}
-                      onPaste={i=>handlePaste(sec,i)}
+                      onTrade={handleTrade}
+                      onPaste={handlePaste}
                     />
                   </div>
                 ))}
